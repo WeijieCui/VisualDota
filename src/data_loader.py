@@ -154,7 +154,7 @@ def faster_rcnn_data_loader(
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        collate_fn=custom_collate_fn  # ✅ 使用自定义 collate_fn
+        collate_fn=custom_collate_fn
     )
 
 

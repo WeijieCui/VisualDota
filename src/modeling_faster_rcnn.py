@@ -56,7 +56,7 @@ def save_model(
         model_path: str = MODEL_ROOT_DEFAULT,
 ):
     model_full_path = os.path.join(model_path, MODEL_PREFIX_DEFAULT + str(version) + MODEL_SUFFIX_DEFAULT)
-    torch.save(model.state_dict(), model_full_path)
+    torch.save(model.to(torch.device('CPU')).state_dict(), model_full_path)
     print(f'saved model to {model_full_path}')
 
 
@@ -91,29 +91,40 @@ def train_model(
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.SGD(params, lr=lr, momentum=momentum, weight_decay=weight_decay)
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
+    try:
+        # Training Loop
+        for epoch in range(epochs):
+            model.train()
+            total_loss = 0
+            count = 0
+            for images, targets in data_loader:
+                images = [img.to(device) for img in images]
+                targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
-    # Training Loop
-    for epoch in range(epochs):
-        model.train()
-        total_loss = 0
-        count = 0
-        for images, targets in data_loader:
-            images = [img.to(device) for img in images]
-            targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+                loss_dict = model(images, targets)
+                losses = sum(loss for loss in loss_dict.values())
 
-            loss_dict = model(images, targets)
-            losses = sum(loss for loss in loss_dict.values())
+                optimizer.zero_grad()
+                losses.backward()
+                optimizer.step()
 
-            optimizer.zero_grad()
-            losses.backward()
-            optimizer.step()
+                total_loss += losses.item()
+                count += len(images)
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                if count % 50 == 0:
+                    print(f'processed {count} images.')
+            lr_scheduler.step()
+            print(f"Epoch {epoch + 1} Loss: {total_loss / len(data_loader)}")
+    except Exception as e:
+        print(f"training interrupt: {e}")
+    finally:
+        # Clean by GC
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        import gc
+        gc.collect()
 
-            total_loss += losses.item()
-            count += len(images)
-            print(f'processed {count} images.')
-
-        lr_scheduler.step()
-        print(f"Epoch {epoch + 1} Loss: {total_loss / len(data_loader)}")
     model.train(mode=False)
 
 
