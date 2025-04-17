@@ -11,7 +11,7 @@ def load_dataset(
         resize: bool = True,
         size: int = 512,
         include_label: bool = True,
-) -> [(Image, [str])]:
+) -> [(Image, dict)]:
     # folder_path
     image_folder_path = os.path.join(folder_path, 'images')
     label_folder_path = os.path.join(folder_path, 'labels')
