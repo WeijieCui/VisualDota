@@ -56,7 +56,7 @@ def save_model(
         model_path: str = MODEL_ROOT_DEFAULT,
 ):
     model_full_path = os.path.join(model_path, MODEL_PREFIX_DEFAULT + str(version) + MODEL_SUFFIX_DEFAULT)
-    torch.save(model.to(torch.device('CPU')).state_dict(), model_full_path)
+    torch.save(model.to(torch.device('cpu')).state_dict(), model_full_path)
     print(f'saved model to {model_full_path}')
 
 
@@ -134,6 +134,7 @@ def predict(
         image_path: str = None,
         confidence_threshold: float = 0.1,
         show: bool = True,
+        saved_img_path: str = None,
 ):
     # load image file
     if image_path:
@@ -172,16 +173,26 @@ def predict(
                 color='white', backgroundcolor='red',
                 fontsize=5,
             )
-
-        plt.show()
+        if saved_img_path:
+            plt.savefig(saved_img_path)
+        else:
+            plt.show()
 
 
 if __name__ == '__main__':
-    _model = load_model(model_name='fasterrcnn_v3.pth')
+    _model = load_model(model_name='fasterrcnn_v7.pth')
     train_loader = faster_rcnn_data_loader(
-        image_dir='data/test/images',
-        label_dir='data/test/labels',
+        image_dir='data/tiny_train/images',
+        label_dir='data/tiny_train/labels',
+        batch_size=20,
+        num_workers=3,
     )
-    # train_model(_model, data_loader=train_loader, epochs=1)
-    save_model(_model, version=4)
-    predict(_model, image_path='data/train/images/P0002.png', confidence_threshold=0)
+    for i in range(8, 15):
+        train_model(_model, data_loader=train_loader, epochs=1)
+        save_model(_model, version=i)
+        predict(
+            _model,
+            image_path='data/tiny_train/images/P0002.png',
+            saved_img_path=f'data/tiny_train/results/P0002_v{i}.png',
+            confidence_threshold=0,
+        )

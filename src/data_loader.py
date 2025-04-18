@@ -79,7 +79,8 @@ class DotaRawDataset(Dataset):
 class JointTransformFasterRCNN:
     def __init__(
             self,
-            size: int,
+            resize: bool = False,
+            size: int = None,
             max_size: int = None,
             to_horizontal_bbox: bool = False,
     ):
@@ -102,13 +103,14 @@ class JointTransformFasterRCNN:
         """
         self.max_size = max_size
         self.size = size
+        self.resize = resize
         self.to_horizontal_bbox = to_horizontal_bbox
-        self.img_transform = transforms.Compose([
-            transforms.Resize(size=size, max_size=max_size),
-            # transforms.CenterCrop(size),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
+        transform_list = []
+        if resize:
+            transform_list.append(transforms.Resize(size=size, max_size=max_size))
+        transform_list.append(transforms.ToTensor())
+        transform_list.append(transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
+        self.img_transform = transforms.Compose(transform_list)
 
     def __call__(self, image: Image, boxes: list = None, labels: list = None):
         r"""Resize the input image and the orient bounding box
@@ -118,8 +120,12 @@ class JointTransformFasterRCNN:
         """
         transformed_image = self.img_transform(image)
         ratio = transformed_image.shape[1] / image.height
-        horizontal_bboxes = [(min(x0, x1, x2, x3), min(y0, y1, y2, y3), max(x0, x1, x2, x3), max(y0, y1, y2, y3),)
+        horizontal_bboxes = [(int(min(x0, x1, x2, x3) * ratio),
+                              int(min(y0, y1, y2, y3) * ratio),
+                              int(max(x0, x1, x2, x3) * ratio),
+                              int(max(y0, y1, y2, y3) * ratio))
                              for ((x0, y0), (x1, y1), (x2, y2), (x3, y3)) in boxes]
+        horizontal_bboxes = [(x0, y0, max(x0 + 2, x1), max(y0 + 2, y1)) for (x0, y0, x1, y1) in horizontal_bboxes]
         num_labels = [DOTA_LABELS[n] for n in labels]
         target = {
             'boxes': torch.tensor(horizontal_bboxes) * ratio,
@@ -141,12 +147,15 @@ def faster_rcnn_data_loader(
         label_dir: str,
         batch_size: int = 10,
         num_workers: int = 2,
+        resize: bool = False,
+        size: int = 500,
+        max_size: int = 1000,
 ) -> DataLoader:
     train_dataset = DotaRawDataset(
         image_dir=image_dir,
         label_dir=label_dir,
         transform=transforms.Compose([transforms.ToTensor()]),
-        joint_transform=JointTransformFasterRCNN(size=224)
+        joint_transform=JointTransformFasterRCNN(resize=resize, size=size, max_size=max_size)
     )
 
     return DataLoader(
