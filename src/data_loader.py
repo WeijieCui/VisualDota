@@ -148,13 +148,12 @@ def faster_rcnn_data_loader(
         batch_size: int = 10,
         num_workers: int = 2,
         resize: bool = False,
-        size: int = 500,
-        max_size: int = 1000,
+        size: int = 800,
+        max_size: int = 1333,
 ) -> DataLoader:
     train_dataset = DotaRawDataset(
         image_dir=image_dir,
         label_dir=label_dir,
-        transform=transforms.Compose([transforms.ToTensor()]),
         joint_transform=JointTransformFasterRCNN(resize=resize, size=size, max_size=max_size)
     )
 
@@ -171,8 +170,8 @@ if __name__ == "__main__":
     transform = transforms.Compose([transforms.ToTensor()])
 
     train_dataset = DotaRawDataset(
-        image_dir='./data/train/images',
-        label_dir='./data/train/labels',
+        image_dir='./data/tiny_train/images',
+        label_dir='./data/tiny_train/labels',
         transform=transform
     )
 
@@ -185,7 +184,10 @@ if __name__ == "__main__":
     )
 
     for batch_idx, (images, labels) in enumerate(train_loader):
-        print(f"批次 {batch_idx + 1}，图像数量: {len(images)}")
-        print(f"第一张图像尺寸: {images[0].shape}")
-        print(f"第一张图像标签: {len(labels[0]['boxes'])}")
+        # print(f"批次 {batch_idx + 1}，图像数量: {len(images)}")
+        # print(f"第一张图像尺寸: {images[0].shape}")
+        # print(f"第一张图像标签: {len(labels[0]['boxes'])}")
         # break
+        for label in labels:
+            if len(label['labels']) < 1:
+                print((batch_idx + 1) * 5, label)

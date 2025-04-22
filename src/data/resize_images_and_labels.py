@@ -36,7 +36,7 @@ def batch_resize_images_and_labels(
                     with Image.open(file_path) as img:
                         resized_img = resize_image(img, target_size, max_size)
                         resized_img.save(file_path)  # overwrite source file
-                        print(f"Resize {file} -> {resized_img.size}")
+                        # print(f"Resize {file} -> {resized_img.size}")
                         ratio = resized_img.width / img.width
                     label_path = os.path.join(root_dir, label_dir, file.split('.')[0] + '.txt')
                     label_raws = []
@@ -50,6 +50,8 @@ def batch_resize_images_and_labels(
                                 continue
                             points = list(map(lambda i: str(int(ratio * int(i))), parts[:8]))
                             label_raws.append(' '.join(points) + ' ' + parts[8] + ' ' + parts[9] + '\n')
+                    if len(label_raws) <= 2:
+                        print(file_path)
                     with open(label_path, 'w') as label_file:
                         label_file.writelines(label_raws)
                 except Exception as e:
