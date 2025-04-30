@@ -178,6 +178,7 @@ data/
 *.png
 *.jpg
 *.tif
+*.txt
 
 # Models
 *.pth
