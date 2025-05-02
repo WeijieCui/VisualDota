@@ -7,14 +7,15 @@ from PIL import Image
 def load_dataset(
         top_num: int = None,
         folder_path: str = './data/train/',
-        files: [str] = None,
+        img_fold: str = 'images',
+        label_fold: str = 'labelTxt',
         resize: bool = True,
         size: int = 512,
         include_label: bool = True,
 ) -> [(Image, dict)]:
     # folder_path
-    image_folder_path = os.path.join(folder_path, 'images')
-    label_folder_path = os.path.join(folder_path, 'labels')
+    image_folder_path = os.path.join(folder_path, img_fold)
+    label_folder_path = os.path.join(folder_path, label_fold)
     # extensions of supported image format
     valid_extensions = {'.jpg', '.jpeg', '.png'}
     # list all image files
@@ -70,7 +71,7 @@ def load_dataset(
     return dataset
 
 
-def count_labels(label_folder_path: str = './data/train/labels/') -> [(str, int)]:
+def count_labels(label_folder_path: str = './data/train/labelTxt/') -> [(str, int)]:
     label_dict = {}
     for filename in os.listdir(label_folder_path):
         label_file_path = os.path.join(label_folder_path, filename)

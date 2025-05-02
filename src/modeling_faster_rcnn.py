@@ -214,6 +214,7 @@ def predict(
         image: torch.Tensor = None,
         image_path: str = None,
         confidence_threshold: float = 0.1,
+        show_label: bool = False,
         saved_img_path: str = None,
         separate: int = 4,
 ):
@@ -248,12 +249,13 @@ def predict(
             (xmin, ymin), xmax - xmin, ymax - ymin,
             linewidth=1, edgecolor='r', facecolor='none')
         ax.add_patch(rect)
-        ax.text(
-            xmin, ymin,
-            f"{label_names[label]}: {score:.2f}",
-            color='white', backgroundcolor='red',
-            fontsize=5,
-        )
+        if show_label:
+            ax.text(
+                xmin, ymin,
+                f"{label_names[label]}: {score:.2f}",
+                color='white', backgroundcolor='red',
+                fontsize=5,
+            )
     if saved_img_path:
         plt.savefig(saved_img_path, bbox_inches='tight', dpi=300)
     else:
