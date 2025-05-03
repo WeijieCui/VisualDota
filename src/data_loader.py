@@ -171,7 +171,7 @@ if __name__ == "__main__":
 
     train_dataset = DotaRawDataset(
         image_dir='./data/tiny_train/images',
-        label_dir='./data/tiny_train/labels',
+        label_dir='./data/tiny_train/labelTxt',
         transform=transform
     )
 

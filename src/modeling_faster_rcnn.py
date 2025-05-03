@@ -1,6 +1,8 @@
+import gc
 import os
 import traceback
 
+import numpy as np
 import cv2
 import torch
 import torchvision
@@ -12,7 +14,7 @@ from torchvision import transforms
 from data_loader import faster_rcnn_data_loader, DOTA_LABELS
 
 DEVICE_DEFAULT = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-MODEL_ROOT_DEFAULT = '../models'
+MODEL_ROOT_DEFAULT = '../models/fasterrcnn'
 MODEL_PREFIX_DEFAULT = 'fasterrcnn_v'
 MODEL_SUFFIX_DEFAULT = '.pth'
 
@@ -79,29 +81,30 @@ def split_into_blocks(img_tensor: torch.Tensor, n: int) -> torch.Tensor:
     return blocks.permute(1, 2, 0, 3, 4).contiguous().view(-1, num_colors, block_h, block_w)
 
 
-def fine_predict(model, images: [], separate: int = 1):
+def fine_predict(model, image, separate: int = 1, confidence_threshold: float = 0.1):
     if separate == 1:
-        return model(images)
-    results = []
-    for image in images:
-        img_tiles = split_into_blocks(image, separate)
-        predictions = model(img_tiles)
-        result_boxes, result_labels, result_scores = [], [], []
-        for i, prediction in enumerate(predictions):
-            xi, yi = i % separate, i // separate
-            num_tiles, num_colors, height, weight = img_tiles.shape
-            boxes = [(x0 + xi * weight, y0 + yi * height, x1 + xi * weight, y1 + yi * height)
-                     for (x0, y0, x1, y1) in prediction['boxes']]
-            result_boxes.extend(boxes)
-            result_labels.extend(prediction['labels'])
-            result_scores.extend(prediction['scores'])
-        result = {
-            'boxes': torch.tensor(result_boxes),
-            'labels': torch.tensor(result_labels),
-            'scores': torch.tensor(result_scores),
-        }
-        results.append(result)
-        return results
+        return model(image)
+    img_tiles = split_into_blocks(image, separate)
+    predictions = model(img_tiles)
+    result_boxes, result_labels, result_scores = [], [], []
+    for i, prediction in enumerate(predictions):
+        keep = prediction['scores'] >= confidence_threshold
+        xi, yi = i % separate, i // separate
+        num_tiles, num_colors, height, weight = img_tiles.shape
+        boxes = [(x0 + xi * weight, y0 + yi * height, x1 + xi * weight, y1 + yi * height)
+                 for (x0, y0, x1, y1) in prediction['boxes'][keep]]
+        result_boxes.extend(boxes)
+        result_labels.extend(prediction['labels'][keep])
+        result_scores.extend(prediction['scores'][keep])
+    result = {
+        'boxes': np.array(result_boxes),
+        'labels': np.array(result_labels),
+        'scores': np.array(result_scores),
+    }
+    images = None
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return result
 
 
 def fine_train(model, images: [], targets: [], separate: int = 1):
@@ -203,7 +206,6 @@ def train_model(
         # Clean by GC
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        import gc
         gc.collect()
 
     model.train(mode=False)
@@ -214,8 +216,6 @@ def predict(
         image: torch.Tensor = None,
         image_path: str = None,
         confidence_threshold: float = 0.1,
-        show_label: bool = False,
-        saved_img_path: str = None,
         separate: int = 4,
 ):
     # load image file
@@ -226,21 +226,28 @@ def predict(
         image = transform(image).to(DEVICE_DEFAULT)
     # predict
     with torch.no_grad():
-        prediction = fine_predict(model, [image], separate=separate)
+        prediction = fine_predict(model, image, separate=separate, confidence_threshold=confidence_threshold)
+    return prediction
 
+
+def show_results(
+        prediction,
+        image: torch.Tensor = None,
+        image_path: str = None,
+        show_label: bool = False,
+        saved_img_path: str = None,
+):
+    # load image file
+    if image_path:
+        image = cv2.imread(image_path)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     # process results
-    boxes = prediction[0]['boxes'].cpu().numpy()
-    scores = prediction[0]['scores'].cpu().numpy()
-    labels = prediction[0]['labels'].cpu().numpy()
-
-    # filter results with low confidence
-    keep = scores >= confidence_threshold
-    boxes = boxes[keep]
-    scores = scores[keep]
-    labels = labels[keep]
+    boxes = prediction['boxes']
+    scores = prediction['scores']
+    labels = prediction['labels']
     # visualization
     fig, ax = plt.subplots(figsize=(8, 6))
-    ax.imshow(image.cpu().permute(1, 2, 0).numpy())
+    ax.imshow(image)
     ax.axis('off')
     label_names = {v: k for k, v in DOTA_LABELS.items()}
     for box, score, label in zip(boxes, scores, labels):
@@ -264,7 +271,7 @@ def predict(
 
 
 if __name__ == '__main__':
-    _version = 1
+    _version = 4
     _separate = 5
     image_dir = 'data/train/images'
     test_image_dir = 'data/test/images'
@@ -284,18 +291,23 @@ if __name__ == '__main__':
         )
     train_loader = faster_rcnn_data_loader(
         image_dir='data/train/images',
-        label_dir='data/train/labels',
+        label_dir='data/train/labelTxt',
         batch_size=5,
         num_workers=3,
     )
     for epoch in range(_version, _version + 1):
         train_model(_model, data_loader=train_loader, epochs=1, separate=_separate)
         save_model(_model, model_name=f'fasterrcnn_s{_separate}_e{epoch}.pth')
-        for _image in [f for f in os.listdir(test_image_dir) if f.endswith(('.jpg', '.png', '.tif'))]:
-            predict(
+        for _image in [f for f in os.listdir(test_image_dir) if f.endswith(('.jpg', '.png', '.tif'))][:2]:
+            _prediction = predict(
                 _model,
                 image_path=os.path.join(test_image_dir, _image),
-                saved_img_path=os.path.join(result_image_dir, f's{_separate}_e{epoch}_{_image}'),
                 confidence_threshold=0.2,
                 separate=_separate,
+            )
+            show_results(
+                image_path=os.path.join(test_image_dir, _image),
+                # saved_img_path=os.path.join(result_image_dir, f's{_separate}_e{epoch}_{_image}'),
+                prediction=_prediction,
+                show_label=False,
             )
