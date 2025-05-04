@@ -99,9 +99,9 @@ def _fine_predict(model, image, separate: int = 5, confidence_threshold: float =
         result_labels.extend(prediction['labels'][keep])
         result_scores.extend(prediction['scores'][keep])
     result = {
-        'boxes': np.array(result_boxes, dtype=np.int32),
-        'labels': np.array(result_labels, dtype=np.int32),
-        'scores': np.round(np.array(result_scores), 2),
+        'boxes': torch.tensor(result_boxes).cpu().numpy().astype(int),
+        'labels': torch.tensor(result_labels).cpu().numpy().astype(int),
+        'scores': np.round(torch.tensor(result_scores).cpu().numpy(), 2),
     }
     images = None
     if torch.cuda.is_available():
@@ -350,9 +350,8 @@ if __name__ == '__main__':
     _version = 5
     _separate = 5
     _confidence_threshold = 0.3
-    image_dir = 'data/train/images'
     test_image_dir = 'data/test/images'
-    val_image_dir = 'data/val/images'
+    val_image_dir = 'data/val/images2'
     _val_output = 'data/val/fasterrcnn'
     model_name = f'fasterrcnn_s{_separate}_e{_version - 1}.pth'
     result_image_dir = test_image_dir.replace('images', 'results')
@@ -369,14 +368,14 @@ if __name__ == '__main__':
             num_classes=15,
         )
     train_loader = faster_rcnn_data_loader(
-        image_dir='data/train/images',
+        image_dir='data/train/images2',
         label_dir='data/train/labelTxt',
         batch_size=5,
         num_workers=3,
     )
     for epoch in range(_version, _version + 1):
-        history = train_model(_model, data_loader=train_loader, epochs=1, separate=_separate)
-        save_model(_model, model_name=f'fasterrcnn_s{_separate}_e{epoch}.pth')
+        # history = train_model(_model, data_loader=train_loader, epochs=1, separate=_separate)
+        # save_model(_model, model_name=f'fasterrcnn_s{_separate}_e{epoch}.pth')
         val_results = validate_model(
             _model,
             img_dir=val_image_dir,
