@@ -1,3 +1,4 @@
+import copy
 import gc
 import os
 import traceback
@@ -17,6 +18,7 @@ DEVICE_DEFAULT = torch.device('cuda') if torch.cuda.is_available() else torch.de
 MODEL_ROOT_DEFAULT = '../models/fasterrcnn'
 MODEL_PREFIX_DEFAULT = 'fasterrcnn_v'
 MODEL_SUFFIX_DEFAULT = '.pth'
+IMG_SUFFIX = ('.jpg', '.png', '.tif')
 
 
 def _get_model(num_classes: int) -> FasterRCNN:
@@ -59,7 +61,7 @@ def save_model(
         model_path: str = MODEL_ROOT_DEFAULT,
 ):
     model_full_path = os.path.join(model_path, model_name)
-    torch.save(model.to(torch.device('cpu')).state_dict(), model_full_path)
+    torch.save(copy.deepcopy(model).cpu().state_dict(), model_full_path)
     print(f'saved model to {model_full_path}')
 
 
@@ -81,7 +83,7 @@ def split_into_blocks(img_tensor: torch.Tensor, n: int) -> torch.Tensor:
     return blocks.permute(1, 2, 0, 3, 4).contiguous().view(-1, num_colors, block_h, block_w)
 
 
-def fine_predict(model, image, separate: int = 1, confidence_threshold: float = 0.1):
+def _fine_predict(model, image, separate: int = 5, confidence_threshold: float = 0.3):
     if separate == 1:
         return model(image)
     img_tiles = split_into_blocks(image, separate)
@@ -97,9 +99,9 @@ def fine_predict(model, image, separate: int = 1, confidence_threshold: float = 
         result_labels.extend(prediction['labels'][keep])
         result_scores.extend(prediction['scores'][keep])
     result = {
-        'boxes': np.array(result_boxes),
-        'labels': np.array(result_labels),
-        'scores': np.array(result_scores),
+        'boxes': np.array(result_boxes, dtype=np.int32),
+        'labels': np.array(result_labels, dtype=np.int32),
+        'scores': np.round(np.array(result_scores), 2),
     }
     images = None
     if torch.cuda.is_available():
@@ -107,23 +109,25 @@ def fine_predict(model, image, separate: int = 1, confidence_threshold: float = 
     return result
 
 
-def fine_train(model, images: [], targets: [], separate: int = 1):
+def _fine_train(model, images: [], targets: [], separate: int = 5):
     if separate == 1:
         return model(images, targets)
     results = []
     for image, target in zip(images, targets):
         img_tiles = split_into_blocks(image, separate)
-        num_tiles, num_colors, height, weight = img_tiles.shape
+        num_tiles, num_colors, height, width = img_tiles.shape
         fine_targets = [{
             'boxes': [],
             'labels': []
         } for i in range(separate ** 2)]
         for (xmin, ymin, xmax, ymax), label in zip(target['boxes'], target['labels']):
-            xi, xj, yi, yj = int(xmin // weight), int(xmax // weight), int(ymin // height), int(ymax // height)
+            xi, xj, yi, yj = int(xmin // width), int(xmax // width), int(ymin // height), int(ymax // height)
             if xi == xj and yi == yj:
                 idx = xi + yi * separate
+                if idx >= len(fine_targets):
+                    continue
                 fine_targets[idx]['boxes'].append(
-                    (xmin - xi * weight, ymin - yi * height, xmax - xi * weight, ymax - yi * height))
+                    (xmin - xi * width, ymin - yi * height, xmax - xi * width, ymax - yi * height))
                 fine_targets[idx]['labels'].append(label)
         available = [len(target['boxes']) > 0 for target in fine_targets]
         if not any(available):
@@ -135,11 +139,12 @@ def fine_train(model, images: [], targets: [], separate: int = 1):
             for fine_target in fine_targets]
         results.append(model([image for image in img_tiles[available, :, :, :]],
                              [target for i, target in enumerate(fine_targets) if available[i]]))
+    length = max(len(results), 1)
     return {
-        'loss_box_reg': sum(result['loss_box_reg'] for result in results) / len(results),
-        'loss_classifier': sum(result['loss_classifier'] for result in results) / len(results),
-        'loss_objectness': sum(result['loss_objectness'] for result in results) / len(results),
-        'loss_rpn_box_reg': sum(result['loss_rpn_box_reg'] for result in results) / len(results),
+        'loss_box_reg': sum(result['loss_box_reg'] for result in results) / length,
+        'loss_classifier': sum(result['loss_classifier'] for result in results) / length,
+        'loss_objectness': sum(result['loss_objectness'] for result in results) / length,
+        'loss_rpn_box_reg': sum(result['loss_rpn_box_reg'] for result in results) / length,
     }
 
 
@@ -155,10 +160,27 @@ def train_model(
         step_size: int = 8,
         gamma: float = 0.1,
         epochs: int = 10,
-        separate: int = 1,
-):
+        separate: int = 5,
+) -> [int]:
+    """
+    Train Faster RCNN model
+    :param model: Faster-RCNN model
+    :param data_loader:
+    :param device:
+    :param train_roi_head:
+    :param train_box_predictor:
+    :param lr:
+    :param momentum:
+    :param weight_decay:
+    :param step_size:
+    :param gamma:
+    :param epochs:
+    :param separate: the number of separated picture pre edge
+    :return: history of loss for each epoch [int]
+    """
     print('training faster-rcnn model')
     device = device or DEVICE_DEFAULT
+    history = []
     # Freeze all parameters
     for param in model.parameters():
         param.requires_grad = False
@@ -185,7 +207,7 @@ def train_model(
             for images, targets in data_loader:
                 images = [img.to(device) for img in images]
                 targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-                loss_dict = fine_train(model, images, targets, separate=separate)
+                loss_dict = _fine_train(model, images, targets, separate=separate)
                 losses = sum(loss for loss in loss_dict.values())
                 optimizer.zero_grad()
                 losses.backward()
@@ -195,11 +217,12 @@ def train_model(
                 count += len(images)
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-                if count % 5 == 0:
-                    print(f'processed {count} images.')
+                print(f'\rprocessed {count} images.', end='', flush=True)
             lr_scheduler.step()
             model.train(mode=False)
-            print(f"Epoch {epoch + 1} Loss: {total_loss / len(data_loader)}, loss_dict: {loss_dict}")
+            avg_loss = total_loss / max(len(data_loader), 1)
+            history.append(avg_loss)
+            print(f"Epoch {epoch + 1} Loss: {avg_loss}, loss_dict: {loss_dict}")
     except Exception as e:
         traceback.print_exc()
     finally:
@@ -209,15 +232,29 @@ def train_model(
         gc.collect()
 
     model.train(mode=False)
+    return history
 
 
 def predict(
         model: FasterRCNN,
         image: torch.Tensor = None,
         image_path: str = None,
-        confidence_threshold: float = 0.1,
-        separate: int = 4,
+        confidence_threshold: float = 0.3,
+        separate: int = 5,
 ):
+    """
+    Detect objects by Faster RCNN model
+    :param model: Faster RCNN model
+    :param image: a tensor of an image, torch.Tensor
+    :param image_path: an image path
+    :param confidence_threshold: threshold
+    :param separate: the number of separated picture pre edge
+    :return: prediction {
+        'boxes': np.array(boxes),
+        'labels': np.array(labels),
+        'scores': np.array(scores),
+    }
+    """
     # load image file
     if image_path:
         image = cv2.imread(image_path)
@@ -226,8 +263,47 @@ def predict(
         image = transform(image).to(DEVICE_DEFAULT)
     # predict
     with torch.no_grad():
-        prediction = fine_predict(model, image, separate=separate, confidence_threshold=confidence_threshold)
+        prediction = _fine_predict(model, image, separate=separate, confidence_threshold=confidence_threshold)
     return prediction
+
+
+def validate_model(
+        model: FasterRCNN,
+        img_dir: str,
+        val_output: str,
+        confidence_threshold: float = 0.3,
+        separate: int = 5,
+):
+    """
+    validate FasterRCNN model
+    :param model: Faster RCNN
+    :param img_dir:
+    :param val_output:
+    :param confidence_threshold:
+    :param separate: the number of separated picture pre edge
+    :return: results, {label: [imgname score x1 y1 x2 y2 x3 y3 x4 y4]}
+    """
+    results = {label: [] for label in range(15)}
+    label_dict = {label: name for name, label in DOTA_LABELS.items()}
+    for count, img_name in enumerate([f for f in os.listdir(img_dir) if f.endswith(IMG_SUFFIX)]):
+        prediction = predict(
+            model,
+            image_path=os.path.join(img_dir, img_name),
+            confidence_threshold=confidence_threshold,
+            separate=separate,
+        )
+        for box, label, score in zip(prediction['boxes'], prediction['labels'], prediction['scores']):
+            results[label].append(
+                [img_name.split('.')[0], score, box[0], box[1], box[2], box[1], box[2], box[3], box[0], box[3]])
+        print(f'\rprocessed {count + 1} images.', end='', flush=True)
+    # write prediction to file: imgname score x1 y1 x2 y2 x3 y3 x4 y4 plane.txt, storage-tank.txt
+    if val_output:
+        os.makedirs(val_output, exist_ok=True)
+        for label, targets in results.items():
+            with open(os.path.join(val_output, label_dict[label] + '.txt'), 'w') as file:
+                for target in targets:
+                    file.write(' '.join(str(i) for i in target) + '\n')
+    return results
 
 
 def show_results(
@@ -271,10 +347,13 @@ def show_results(
 
 
 if __name__ == '__main__':
-    _version = 4
+    _version = 5
     _separate = 5
+    _confidence_threshold = 0.3
     image_dir = 'data/train/images'
     test_image_dir = 'data/test/images'
+    val_image_dir = 'data/val/images2'
+    _val_output = 'data/val/fasterrcnn'
     model_name = f'fasterrcnn_s{_separate}_e{_version - 1}.pth'
     result_image_dir = test_image_dir.replace('images', 'results')
     if not os.path.exists(result_image_dir):
@@ -296,13 +375,20 @@ if __name__ == '__main__':
         num_workers=3,
     )
     for epoch in range(_version, _version + 1):
-        train_model(_model, data_loader=train_loader, epochs=1, separate=_separate)
+        history = train_model(_model, data_loader=train_loader, epochs=1, separate=_separate)
         save_model(_model, model_name=f'fasterrcnn_s{_separate}_e{epoch}.pth')
-        for _image in [f for f in os.listdir(test_image_dir) if f.endswith(('.jpg', '.png', '.tif'))][:2]:
+        val_results = validate_model(
+            _model,
+            img_dir=val_image_dir,
+            val_output=_val_output,
+            confidence_threshold=_confidence_threshold,
+            separate=_separate,
+        )
+        for _image in [f for f in os.listdir(test_image_dir) if f.endswith(IMG_SUFFIX)][:1]:
             _prediction = predict(
                 _model,
                 image_path=os.path.join(test_image_dir, _image),
-                confidence_threshold=0.2,
+                confidence_threshold=_confidence_threshold,
                 separate=_separate,
             )
             show_results(
