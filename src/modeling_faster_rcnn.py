@@ -352,7 +352,7 @@ if __name__ == '__main__':
     _confidence_threshold = 0.3
     image_dir = 'data/train/images'
     test_image_dir = 'data/test/images'
-    val_image_dir = 'data/val/images2'
+    val_image_dir = 'data/val/images'
     _val_output = 'data/val/fasterrcnn'
     model_name = f'fasterrcnn_s{_separate}_e{_version - 1}.pth'
     result_image_dir = test_image_dir.replace('images', 'results')
