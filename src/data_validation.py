@@ -1,4 +1,5 @@
 import os
+import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from shapely.geometry import Polygon
@@ -148,14 +149,13 @@ def voc_eval(detpath, annopath, imagesetfile, classname, ovthresh=0.5, use_07_me
 
 def run_dota_evaluation(
     dataset_root_dir='./data',
-    detpath_template='{}/val/fasterrcnn_prediction/{:s}.txt',
-    annopath_template='{}/val/labels/{:s}.txt',
+    detpath_template='data/val/fasterrcnn_prediction/{:s}.txt',
+    annopath_template='data/val/labelTxt/{:s}.txt',
     printclassap=False
 ):
     """
     This method is used for mAP calculation.
 
-    dataset_root_dir : The root directory of the dataset.
     detpath_template : Template path of the prediction result files.
     annopath_template : Template path to the ground truth label files.
     printclassap : Whether to print AP for each class.
@@ -171,9 +171,6 @@ def run_dota_evaluation(
         for prefix in file_prefixes:
             f.write(prefix + '\n')
 
-    # Set paths
-    detpath = detpath_template.format(dataset_root_dir)
-    annopath = annopath_template.format(dataset_root_dir)
     imagesetfile = predict_txt_path
 
     # Define class names
@@ -187,7 +184,7 @@ def run_dota_evaluation(
     # Calculate AP for each class
     total_ap = 0.0
     for classname in classnames:
-        rec, prec, ap = voc_eval(detpath, annopath, imagesetfile, classname, ovthresh=0.5, use_07_metric=True)
+        rec, prec, ap = voc_eval(detpath_template, annopath_template, imagesetfile, classname, ovthresh=0.5, use_07_metric=True)
 
         if printclassap:
             print(f"Evaluating class: {classname}")
@@ -249,10 +246,6 @@ def display_images(image_filename, yolo_save_dir, faster_rcnn_dir):
     plt.tight_layout()
     plt.show()
 
-
-
-import cv2
-import os
 
 def enhance_and_save_images(image_filename, dataset_root_dir, enhanced_dir, reduction_factor=0.5):
     """
