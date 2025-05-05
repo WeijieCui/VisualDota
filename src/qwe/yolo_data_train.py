@@ -15,6 +15,6 @@ if __name__ == '__main__':
     yaml_file_name = 'DOTA_yolo.yaml'
     yaml = f"{current_folder}/{yaml_file_name}"
     # Load a model
-    model = YOLO("yolo11n-obb-dota.yaml").load("yolo11n.pt")
+    model = YOLO("yolo11n-obb.yaml").load("yolo11n.pt")
     # Train the model
     results = model.train(data=yaml, epochs=12, imgsz=768, batch=2)
