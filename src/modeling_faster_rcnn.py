@@ -150,7 +150,8 @@ def _fine_train(model, images: [], targets: [], separate: int = 5):
 
 def train_model(
         model: FasterRCNN,
-        data_loader: DataLoader,
+        train_data_loader: DataLoader,
+        val_data_loader: DataLoader,
         device: torch.device = None,
         train_roi_head: bool = False,
         train_box_predictor: bool = True,
@@ -161,11 +162,11 @@ def train_model(
         gamma: float = 0.1,
         epochs: int = 10,
         separate: int = 5,
-) -> [int]:
+) -> [[float]]:
     """
     Train Faster RCNN model
     :param model: Faster-RCNN model
-    :param data_loader:
+    :param train_data_loader:
     :param device:
     :param train_roi_head:
     :param train_box_predictor:
@@ -203,8 +204,9 @@ def train_model(
         for epoch in range(epochs):
             model.train()
             total_loss = 0
+            total_val_loss = 0
             count = 0
-            for images, targets in data_loader:
+            for images, targets in train_data_loader:
                 images = [img.to(device) for img in images]
                 targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
                 loss_dict = _fine_train(model, images, targets, separate=separate)
@@ -218,11 +220,28 @@ def train_model(
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                 print(f'\rprocessed {count} images.', end='', flush=True)
+            print('\nvalidate model')
+            count = 0
+            for images, targets in val_data_loader:
+                images = [img.to(device) for img in images]
+                targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+                loss_dict = _fine_train(model, images, targets, separate=separate)
+                losses = sum(loss for loss in loss_dict.values())
+                optimizer.zero_grad()
+                losses.backward()
+                optimizer.step()
+
+                total_val_loss += losses.item()
+                count += len(images)
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                print(f'\rprocessed {count} images.', end='', flush=True)
             lr_scheduler.step()
             model.train(mode=False)
-            avg_loss = total_loss / max(len(data_loader), 1)
-            history.append(avg_loss)
-            print(f"Epoch {epoch + 1} Loss: {avg_loss}, loss_dict: {loss_dict}")
+            avg_train_loss = total_loss / max(len(train_data_loader), 1)
+            avg_val_loss = total_val_loss / max(len(val_data_loader), 1)
+            history.append([float(avg_train_loss), float(avg_val_loss)])
+            print(f"Epoch {epoch + 1} Loss: {avg_train_loss}, avg_val_loss: {avg_val_loss}")
     except Exception as e:
         traceback.print_exc()
     finally:
@@ -346,12 +365,31 @@ def show_results(
     plt.close()
 
 
+def show_history():
+    train_losses = []
+    val_losses = []
+    with open('faster_rcnn_train.txt', mode='r') as f:
+        for line in f.readlines():
+            sp = line.split(',')
+            train_losses.append(round(float(sp[2][7:]), 3))
+            val_losses.append(round(float(sp[3][5:]), 3))
+    plt.plot(train_losses, label='train')
+    plt.plot(val_losses, label='validate')
+    plt.xlabel('epochs')
+    plt.ylabel('loss')
+    plt.title('Loss by Epochs')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
 if __name__ == '__main__':
-    _version = 5
+    show_history()
+    _version = 1
     _separate = 5
     _confidence_threshold = 0.3
     test_image_dir = 'data/test/images'
-    val_image_dir = 'data/val/images2'
+    val_image_dir = 'data/val/images'
     _val_output = 'data/val/fasterrcnn'
     model_name = f'fasterrcnn_s{_separate}_e{_version - 1}.pth'
     result_image_dir = test_image_dir.replace('images', 'results')
@@ -368,31 +406,45 @@ if __name__ == '__main__':
             num_classes=15,
         )
     train_loader = faster_rcnn_data_loader(
-        image_dir='data/train/images2',
+        image_dir='data/train/images',
         label_dir='data/train/labelTxt',
-        batch_size=5,
+        batch_size=1,
         num_workers=3,
     )
-    for epoch in range(_version, _version + 1):
-        # history = train_model(_model, data_loader=train_loader, epochs=1, separate=_separate)
-        # save_model(_model, model_name=f'fasterrcnn_s{_separate}_e{epoch}.pth')
-        val_results = validate_model(
+    val_loader = faster_rcnn_data_loader(
+        image_dir='data/val/images',
+        label_dir='data/val/labelTxt',
+        batch_size=1,
+        num_workers=3,
+    )
+    for epoch in range(_version, _version + 12):
+        history = train_model(
             _model,
-            img_dir=val_image_dir,
-            val_output=_val_output,
-            confidence_threshold=_confidence_threshold,
+            train_data_loader=train_loader,
+            val_data_loader=val_loader,
+            epochs=1,
             separate=_separate,
         )
-        for _image in [f for f in os.listdir(test_image_dir) if f.endswith(IMG_SUFFIX)][:1]:
-            _prediction = predict(
-                _model,
-                image_path=os.path.join(test_image_dir, _image),
-                confidence_threshold=_confidence_threshold,
-                separate=_separate,
-            )
-            show_results(
-                image_path=os.path.join(test_image_dir, _image),
-                # saved_img_path=os.path.join(result_image_dir, f's{_separate}_e{epoch}_{_image}'),
-                prediction=_prediction,
-                show_label=False,
-            )
+        save_model(_model, model_name=f'fasterrcnn_s{_separate}_e{epoch}.pth')
+        with open('faster_rcnn_train.txt', mode='a') as _f:
+            _f.write(f'separate: {_separate}, epochs: {epoch}, train: {history[0][0]}, val: {history[0][1]}\n')
+        # val_results = validate_model(
+        #     _model,
+        #     img_dir=val_image_dir,
+        #     val_output=_val_output,
+        #     confidence_threshold=_confidence_threshold,
+        #     separate=_separate,
+        # )
+        # for _image in [f for f in os.listdir(test_image_dir) if f.endswith(IMG_SUFFIX)][:1]:
+        #     _prediction = predict(
+        #         _model,
+        #         image_path=os.path.join(test_image_dir, _image),
+        #         confidence_threshold=_confidence_threshold,
+        #         separate=_separate,
+        #     )
+        #     show_results(
+        #         image_path=os.path.join(test_image_dir, _image),
+        #         # saved_img_path=os.path.join(result_image_dir, f's{_separate}_e{epoch}_{_image}'),
+        #         prediction=_prediction,
+        #         show_label=False,
+        #     )
