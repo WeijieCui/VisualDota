@@ -1,3 +1,0 @@
-imagesource:GoogleEarth
-gsd:1.66468376839
-192 239 239 239 239 287 192 287 roundabout 1
