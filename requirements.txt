@@ -1,2 +1,7 @@
 pillow
 matplotlib==3.9.0
+torch
+torchvision
+importlib
+ultralytics
+shapely
