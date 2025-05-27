@@ -9,7 +9,7 @@ Each object is labeled using oriented bounding boxes (OBBs) to handle complex or
 and tagged by detection difficulty. 
 This makes DOTA ideal for testing models in real world scenarios involving scale, rotation, and dense object layouts.
 
-![img.png](img.png)
+<img alt="result_car2.png" src="src\asserts\images\img.png" width="800"/>
 
 In disaster response and rescue operations, rapid and accurate identification of critical
 infrastructure and affected zones is essential. 
